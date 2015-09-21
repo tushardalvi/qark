@@ -8,10 +8,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.'''
 import os
 import sys
 import re
-
 from modules.common import Severity, ReportIssue
-
-sys.path.insert(0, 'lib')
 from bs4 import BeautifulSoup
 from modules import common
 import logging
@@ -415,3 +412,10 @@ def reset():
         os.rename(common.getConfig("rootDir") + "/report/index.html", common.getConfig("rootDir") + "/report/report.html")
     except Exception as e:
         common.logger.debug("Error when trying to reset report")
+
+
+def report_badger(identity, objectlist):
+
+	for item in objectlist:
+		if isinstance(item, ReportIssue):
+			write_badger(identity, item.getSeverity(), item.getDetails(), item.getExtras())

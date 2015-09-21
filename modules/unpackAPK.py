@@ -16,16 +16,16 @@ import threading
 import re
 import shutil
 import time
-from lib.progressbar import *
+from progressbar import *
 import time
-from lib import blessings
+import blessings
 from common import logger
 from subprocess import Popen, PIPE, STDOUT
 from collections import defaultdict
 from multiprocessing import Process
 from threading import Thread, Lock
 import report
-from lib.pubsub import pub
+from pubsub import pub
 
 
 lock = Lock()

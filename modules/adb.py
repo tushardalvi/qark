@@ -4,9 +4,15 @@
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.'''
+import os
+import stat
+from subprocess import Popen, PIPE, STDOUT
+import time
 
 from modules import common,findExtras,report
 import re
+
+
 
 def show_adb_commands(component,compType,packageName):
 	#Print ADB commands for exploitation
@@ -298,3 +304,109 @@ def show_adb_commands(component,compType,packageName):
 				print "TO CALL THE PROVIDER DIRECTLY"
 				print "adb shell content call --uri <URI> --method <METHOD> [--arg <ARG>]"
 	return
+
+
+def show_exports(compList,compType):
+	try:
+		if len(compList)>0:
+			if compType=='activity':
+				print "==>EXPORTED ACTIVITIES: "
+				for index,component in enumerate(compList):
+					print str(index)+": "+str(component)
+					try:
+						show_adb_commands(str(component),compType,common.package_name)
+					except Exception as e:
+						common.logger.error("Problem running adb.show_adb_commands, for Activities, in qark.py: " + str(e))
+				'''elif compType=='alias':
+					print "==>EXPORTED ACTIVITY ALIASES: "
+					adb.show_adb_commands(component[1],compType,common.package_name)'''
+			elif compType=='service':
+				print "==>EXPORTED SERVICES: "
+				for index,component in enumerate(compList):
+					print str(index)+": "+str(component)
+					try:
+						show_adb_commands(str(component),compType,common.package_name)
+					except Exception as e:
+						common.logger.error("Problem running adb.show_adb_commands, for Services, in qark.py: " + str(e))
+						'''if compType=='provider':
+							print "==>EXPORTED PROVIDERS: "
+							adb.show_adb_commands(component[1],compType,common.package_name)'''
+			elif compType=='receiver':
+				print "==>EXPORTED RECEIVERS: "
+				for index,component in enumerate(compList):
+					print str(index)+": "+str(component)
+					try:
+						show_adb_commands(str(component),compType,common.package_name)
+					except Exception as e:
+						common.logger.error("Problem running adb.show_adb_commands, for Receivers, in qark.py: " + str(e))
+
+	except Exception as e:
+			common.logger.error("Problem running show_exports in qark.py: " + str(e))
+	return
+
+
+def list_all_apk():
+		result = []
+		adb = common.getConfig('AndroidSDKPath') + "platform-tools/adb"
+		st = os.stat(adb)
+		os.chmod(adb, st.st_mode | stat.S_IEXEC)
+		while True:
+					p1 = Popen([adb, 'devices'], stdout=PIPE, stdin=PIPE, stderr=STDOUT)
+					a = 0
+					error = False
+					for line in p1.stdout:
+						a = a+1
+						if "daemon not running. starting it now on port" in line:
+							error = True
+					# If atleast one device is connected
+					if a >2 and not error:
+						break
+					else:
+						common.logger.warning("Waiting for a device to be connected...")
+						time.sleep(5)
+		p0 = Popen([adb, 'shell', 'pm', 'list', 'packages', '-f'], stdout=PIPE, stdin=PIPE, stderr=STDOUT)
+		index = 0
+		for line in p0.stdout:
+
+
+			path = str(line).find('=')
+			result.append(str(line)[8:path])
+			index+=1
+		return result
+
+
+def uninstall(package):
+	print "trying to uninstall " + package
+	result = []
+	adb = common.getConfig('AndroidSDKPath') + "platform-tools/adb"
+	st = os.stat(adb)
+	os.chmod(adb, st.st_mode | stat.S_IEXEC)
+	while True:
+				p1 = Popen([adb, 'devices'], stdout=PIPE, stdin=PIPE, stderr=STDOUT)
+				a = 0
+				for line in p1.stdout:
+					a = a+1
+				# If atleast one device is connected
+				if a >2 :
+					break
+				else:
+					common.logger.warning("Waiting for a device to be connected...")
+					time.sleep(5)
+	uninstall = Popen([adb, 'shell', 'pm', 'uninstall', package], stdout=PIPE, stdin=PIPE, stderr=STDOUT)
+	for line in uninstall.stdout:
+		if "Failure" in line:
+			package = re.sub('-\d$', '', package)
+			uninstall_try_again = Popen([adb, 'shell', 'pm', 'uninstall', package], stdout=PIPE, stdin=PIPE, stderr=STDOUT)
+	return
+
+
+def pull_apk(pathOnDevice):
+	adb = common.getConfig('AndroidSDKPath') + "platform-tools/adb"
+	st = os.stat(adb)
+	os.chmod(adb, st.st_mode | stat.S_IEXEC)
+	if not os.path.exists('temp' + "/"):
+		os.makedirs('temp' + "/")
+	p0 = Popen([adb, 'pull', pathOnDevice, 'temp/'+str(pathOnDevice).split('/')[-1]], stdout=PIPE, stdin=PIPE, stderr=STDOUT)
+	for line in p0.stdout:
+		print line,
+	return 'temp/'+str(pathOnDevice).split('/')[-1]

@@ -14,7 +14,7 @@ import logging
 from report import ReportIssue
 from modules.common import Severity, ReportIssue
 from createExploit import ExploitType
-from lib.pubsub import pub
+from pubsub import pub
 from common import terminalPrint
 
 parser = plyj.Parser()

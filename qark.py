@@ -5,154 +5,45 @@ Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS, 
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.'''
 
-import os
-import re
-import sys
-import stat
+import os, sys
 import fnmatch
-sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)) + '/lib')
-
-from subprocess import Popen, PIPE, STDOUT
-import urllib2
-import ast
-import string
 from collections import defaultdict
 from xml.dom import minidom
-import lib.axmlparserpy.axmlprinter as axmlprinter
-from modules.IssueType import IssueType, IssueSeverity
 import traceback
-from modules import common,findExtras,webviews, report, unpackAPK
+import logging
+import shutil
+from threading import Thread
+from Queue import Queue
+import subprocess
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)) + '/../lib')
+import axmlparserpy.axmlprinter as axmlprinter
 
-from modules.DetermineMinSDK import determine_min_sdk
+from pyfiglet import Figlet
+
+from pubsub import pub
+
+from modules import findExtras,webviews, report, unpackAPK
+from modules.DetermineMinSDK import determine_min_sdk, process_manifest, find_manifest_in_source
 from modules import sdkManager
 from modules import createSploit
 from modules import createExploit
 from modules import writeExploit
-from modules import intentTracer
 from modules import findMethods
 from modules import findPending
 from modules import findBroadcasts
 from modules import findTapJacking
 from modules import filePermissions
-from modules import exportedPreferenceActivity
-from modules import useCheckPermission
 from modules import cryptoFlaws
-import logging
-import time
-import shutil
 from modules import certValidation
 from modules import GeneralIssues
 from modules import contentProvider
+from modules.adb import show_exports, list_all_apk, uninstall, pull_apk
+from modules.cli import exploit_choice
 from modules.contentProvider import *
 from modules import filters
-from modules.common import terminalPrint, Severity, ReportIssue
-from lib import argparse
-from lib.pyfiglet import Figlet
-from threading import Thread, Lock
-from Queue import Queue
-from modules.report import Severity, ReportIssue
-from modules.createExploit import ExploitType
-from lib.pubsub import pub
-import subprocess
-from lib.progressbar import ProgressBar, Percentage, Bar
-from modules import adb
-
-package_name=''
-pbar_file_permission_done = False
-lock = Lock()
-
-def exit():
-	"""
-	Wrapper for exiting the program gracefully. Internally calls sys.exit()
-	"""
-	sys.exit()
-
-def clear_lines(n):
-	"""
-   Clear the space before using it
-	"""
-	thread0 = Thread(name='Clear Lines', target=clear, args=(n,))
-	thread0.start()
-	thread0.join()
-
-def clear(n):
-	"""
-	clears n lines on the terminal
-	"""
-	with common.term.location():
-		print("\n"*n)
-
-def progress_bar_update(count1=None,count2=None,count3=None,count4=None,count5=None,count6=None):
-	lock.acquire()
-	global pbar_file_permission_done
-	if count1 is not None:
-		if count1<=100:
-			pbar1.update(count1)
-	if count2 is not None:
-		if count2<=100:
-			pbar2.update(count2)
-	if count3 is not None:
-		if not pbar_file_permission_done:
-			if count3<100:
-				pbar3.update(count3)
-			else:
-				pbar3.update(count3)
-				pbar_file_permission_done = True
-		else:
-			pbar4.update(count3)
-	if count4 is not None:
-		if count4<=100:
-			pbar5.update(count4)
-	if count5 is not None:
-		if count5<=100:
-			pbar6.update(count5)
-	if count6 is not None:
-		if count6<=100:
-			pbar7.update(count6)
-	lock.release()
-
-def version():
-	print "Version 0.8"
-	sys.exit()
-
-def show_exports(compList,compType):
-	try:
-		if len(compList)>0:
-			if compType=='activity':
-				print "==>EXPORTED ACTIVITIES: "
-				for index,component in enumerate(compList):
-					print str(index)+": "+str(component)
-					try:
-						adb.show_adb_commands(str(component),compType,package_name)
-					except Exception as e:
-						common.logger.error("Problem running adb.show_adb_commands, for Activities, in qark.py: " + str(e))
-				'''elif compType=='alias':
-					print "==>EXPORTED ACTIVITY ALIASES: "
-					adb.show_adb_commands(component[1],compType,package_name)'''
-			elif compType=='service':
-				print "==>EXPORTED SERVICES: "
-				for index,component in enumerate(compList):
-					print str(index)+": "+str(component)
-					try:
-						adb.show_adb_commands(str(component),compType,package_name)
-					except Exception as e:
-						common.logger.error("Problem running adb.show_adb_commands, for Services, in qark.py: " + str(e))
-						'''if compType=='provider':
-							print "==>EXPORTED PROVIDERS: "
-							adb.show_adb_commands(component[1],compType,package_name)'''
-			elif compType=='receiver':
-				print "==>EXPORTED RECEIVERS: "
-				for index,component in enumerate(compList):
-					print str(index)+": "+str(component)
-					try:
-						adb.show_adb_commands(str(component),compType,package_name)
-					except Exception as e:
-						common.logger.error("Problem running adb.show_adb_commands, for Receivers, in qark.py: " + str(e))
-
-	except Exception as e:
-			common.logger.error("Problem running show_exports in qark.py: " + str(e))
-	return
-
+from modules.common import terminalPrint, exit, clear_lines
+from modules.report import Severity, report_badger
+from modules.ui import progress_bar_update
 
 ignore = os.system('clear')
 f = Figlet(font='colossal')
@@ -170,83 +61,8 @@ if not os.path.exists(os.path.dirname(os.path.realpath(__file__)) + "/settings.p
 
 #
 common.writeKey("rootDir", common.rootDir)
-
 common.initialize_logger()
-#######################################
-parser = argparse.ArgumentParser(description='QARK - Andr{o}id Source Code Analyzer and Exploitation Tool')
-required = parser.add_argument_group('Required')
-mode = parser.add_argument_group('Mode')
-advanced = parser.add_argument_group('When --source=2')
-auto = parser.add_argument_group('When --source=1')
-optional = parser.add_argument_group('Optional')
-exploitmenu = parser.add_argument_group('Exploit Generation')
-mode.add_argument("-s", "--source", dest="source", metavar='int', type=int, help="1 if you have an APK, 2 if you want to specify the source selectively")
-advanced.add_argument("-m", "--manifest", dest="manifest", help="Enter the full path to the manifest file. Required only when --source==2")
-auto.add_argument("-p", "--pathtoapk", dest="apkpath", help="Enter the full path to the APK file. Required only when --source==1")
 
-advanced_mutual = advanced.add_mutually_exclusive_group()
-advanced_mutual.add_argument("-a", "--autodetectcodepath", dest="autodetect", help="AutoDetect java source code path based of the path provided for manifest. 1=autodetect, 0=specify manually")
-advanced_mutual.add_argument("-c", "--codepath", dest="codepath", help="Enter the full path to the root folder containing java source. Required only when --source==2")
-
-optional.add_argument("-e", "--exploit", dest="exploit", help="1 to generate a targeted exploit APK, 0 to skip")
-optional.add_argument("-i", "--install", dest="install", help="1 to install exploit APK on the device, 0 to skip")
-optional.add_argument("-d", "--debug", dest="debuglevel", help="Debug Level. 10=Debug, 20=INFO, 30=Warning, 40=Error")
-optional.add_argument("-v", "--version", dest="version", help="Print version info", action='store_true')
-optional.add_argument("-r", "--reportdir", dest="reportdir", help="Specify full path for output report directory. Defaults to /report")
-required_group = required.add_mutually_exclusive_group()
-required_group.add_argument("-t", "--acceptterms", dest="acceptterms", help="Automatically accept terms and conditions when downloading Android SDK")
-required_group.add_argument("-b", "--basesdk", dest="basesdk", help="Specify the full path to the root directory of the Android SDK")
-
-
-common.args = parser.parse_args()
-
-if len(sys.argv) > 1:
-	common.interactive_mode = False
-
-#######################################
-#Command line argument sanity checks
-if not common.interactive_mode:
-	if not common.args.source:
-		common.logger.error("Please specify source (--source=1 or --source==2)")
-		exit()
-	if common.args.source==1:
-		if common.args.apkpath is None:
-			common.logger.error("When selecting --source=1, Please provide the path to the APK via --pathtoapk flag")
-			exit()
-		if common.args.exploit is None:
-			common.logger.error("--exploit flag missing. Possible values 0/1")
-			exit()
-		if int(common.args.exploit) == 1:
-			if common.args.install is None:
-				common.logger.error("--install flag missing. Possible values 0/1")
-				exit()
-	if common.args.source==2:
-		if common.args.autodetect is None:
-			if common.args.manifest is None or common.args.codepath is None:
-				common.logger.error("When selecting --source=2, Please either pass --autodetectcodepath=1 or both --manifest and --codepath")
-		if common.args.exploit is None:
-			common.logger.error("--exploit flag missing. Possible values 0/1")
-			exit()
-		if int(common.args.exploit) == 1:
-			if common.args.install is None:
-				common.logger.error("--install flag missing. Possible values 0/1")
-				exit()
-
-if common.args.debuglevel is not None:
-	if int(common.args.debuglevel) in range(10,60):
-		common.logger.setLevel(int(common.args.debuglevel))
-	else:
-		parser.error("Please provide a valid Debug level (10,20,30,40,50,60)")
-
-exploit_choice = 1
-
-if common.args.version:
-	version()
-
-if common.args.basesdk is not None:
-	common.writeKey('AndroidSDKPath', str(common.args.basesdk).strip())
-
-#######################################
 #Reset any old report
 report.reset()
 common.set_environment_variables()
@@ -263,163 +79,9 @@ else:
 
 common.minSdkVersion=1
 
-def read_files(filename,rex):
-	things_to_inspect=[]
-	with open(filename) as f:
-		content=f.readlines()
-		for y in content:
-			if re.search(rex,y):
-				if re.match(r'^\s*(\/\/|\/\*)',y): #exclude single-line or beginning comments
-					pass
-				elif re.match(r'^\s*\*',y): #exclude lines that are comment bodies
-					pass
-				elif re.match(r'.*\*\/$',y): #exclude lines that are closing comments
-					pass
-				elif re.match(r'^\s*Log\..\(',y): #exclude Logging functions
-					pass
-				elif re.match(r'(.*)(public|private)\s(String|List)',y): #exclude declarations
-					pass
-				else:
-					things_to_inspect.append(y)
-	return things_to_inspect
-
 #Begin
 common.logger.info('Initializing QARK\n')
 common.checkJavaVersion()
-
-def process_manifest(manifest):
-
-	try:
-		common.manifest = os.path.abspath(str(manifest).strip())
-		common.manifest = re.sub("\\\\\s",' ',common.manifest)
-		common.xmldoc = minidom.parse(common.manifest)
-		common.logger.info(common.xmldoc.toprettyxml())
-		report.write_manifest(common.xmldoc)
-	except Exception as e:
-		try:
-			# not human readable yet?
-			ap = axmlprinter.AXMLPrinter(open(common.manifest, 'rb').read())
-			common.xmldoc = minidom.parseString(ap.getBuff())
-			common.logger.info(common.xmldoc.toxml())
-			report.write_manifest(common.xmldoc.toprettyxml())
-		except Exception as e:
-			if not common.interactive_mode:
-				common.logger.error(str(e) + "\r\nThat didnt work. Try providing an absolute path to the file")
-				exit()
-			common.logger.error(str(e) + "\r\nThat didnt work. Try providing an absolute path to the file\n")
-
-
-def list_all_apk():
-		result = []
-		adb = common.getConfig('AndroidSDKPath') + "platform-tools/adb"
-		st = os.stat(adb)
-		os.chmod(adb, st.st_mode | stat.S_IEXEC)
-		while True:
-					p1 = Popen([adb, 'devices'], stdout=PIPE, stdin=PIPE, stderr=STDOUT)
-					a = 0
-					error = False
-					for line in p1.stdout:
-						a = a+1
-						if "daemon not running. starting it now on port" in line:
-							error = True
-					# If atleast one device is connected
-					if a >2 and not error:
-						break
-					else:
-						common.logger.warning("Waiting for a device to be connected...")
-						time.sleep(5)
-		p0 = Popen([adb, 'shell', 'pm', 'list', 'packages', '-f'], stdout=PIPE, stdin=PIPE, stderr=STDOUT)
-		index = 0
-		for line in p0.stdout:
-
-
-			path = str(line).find('=')
-			result.append(str(line)[8:path])
-			index+=1
-		return result
-
-def uninstall(package):
-	print "trying to uninstall " + package
-	result = []
-	adb = common.getConfig('AndroidSDKPath') + "platform-tools/adb"
-	st = os.stat(adb)
-	os.chmod(adb, st.st_mode | stat.S_IEXEC)
-	while True:
-				p1 = Popen([adb, 'devices'], stdout=PIPE, stdin=PIPE, stderr=STDOUT)
-				a = 0
-				for line in p1.stdout:
-					a = a+1
-				# If atleast one device is connected
-				if a >2 :
-					break
-				else:
-					common.logger.warning("Waiting for a device to be connected...")
-					time.sleep(5)
-	uninstall = Popen([adb, 'shell', 'pm', 'uninstall', package], stdout=PIPE, stdin=PIPE, stderr=STDOUT)
-	for line in uninstall.stdout:
-		if "Failure" in line:
-			package = re.sub('-\d$', '', package)
-			uninstall_try_again = Popen([adb, 'shell', 'pm', 'uninstall', package], stdout=PIPE, stdin=PIPE, stderr=STDOUT)
-	return
-
-def pull_apk(pathOnDevice):
-	adb = common.getConfig('AndroidSDKPath') + "platform-tools/adb"
-	st = os.stat(adb)
-	os.chmod(adb, st.st_mode | stat.S_IEXEC)
-	if not os.path.exists('temp' + "/"):
-		os.makedirs('temp' + "/")
-	p0 = Popen([adb, 'pull', pathOnDevice, 'temp/'+str(pathOnDevice).split('/')[-1]], stdout=PIPE, stdin=PIPE, stderr=STDOUT)
-	for line in p0.stdout:
-		print line,
-	return 'temp/'+str(pathOnDevice).split('/')[-1]
-
-def find_manifest_in_source():
-	common.logger.info('Finding AndroidManifest.xml')
-	listOfFiles = []
-	manifestPath=''
-	try:
-		for (dirpath, dirnames, filenames) in os.walk(common.sourceDirectory):
-			for filename in filenames:
-				if filename == 'AndroidManifest.xml':
-					listOfFiles.append(os.path.join(dirpath,filename))
-		if len(listOfFiles)==0:
-			while True:
-				print common.term.cyan + common.term.bold + str(common.config.get('qarkhelper','CANT_FIND_MANIFEST')).decode('string-escape').format(t=common.term)
-				common.sourceDirectory=os.path.abspath(raw_input("Enter path: ")).rstrip()
-				common.sourceDirectory = re.sub("\\\\\s",' ',common.sourceDirectory)
-				if os.path.isdir(common.sourceDirectory):
-					if not common.sourceDirectory.endswith('/'):
-						common.sourceDirectory+='/'
-					manifestPath=find_manifest_in_source()
-					common.manifest=manifestPath
-					break
-				else:
-					common.logger.error("Not a directory. Please try again")
-
-		elif len(listOfFiles)>1:
-			print "Please enter the number corresponding to the correct file:"
-			for f in enumerate(listOfFiles,1):
-				print str(f)
-			while True:
-				selection=int(raw_input())
-				r=range(1,len(listOfFiles)+1)
-				if int(selection) in r:
-					manifestPath=listOfFiles[selection-1]
-					break
-				else:
-					print "Invalid selection, please enter a number between 1 and " + str(len(listOfFiles))
-		else:
-			manifestPath=listOfFiles[0]
-	except Exception as e:
-		common.logger.error(str(e))
-		exit()
-	return manifestPath
-
-def report_badger(identity, objectlist):
-
-	for item in objectlist:
-		if isinstance(item, ReportIssue):
-			report.write_badger(identity, item.getSeverity(), item.getDetails(), item.getExtras())
 
 if common.interactive_mode:
 	while True:
@@ -555,10 +217,10 @@ try:
 	act_priv_list, act_exp_list, act_exp_perm_list, act_prot_broad_list, report_data, results=common.check_export('activity',True)
 
 	#Normalizing activity names for use in exploit APK, so all will be absolute
-	act_priv_list=common.normalizeActivityNames(act_priv_list,package_name)
-	act_exp_list=common.normalizeActivityNames(act_exp_list,package_name)
-	act_exp_perm_list=common.normalizeActivityNames(act_exp_perm_list,package_name)
-	act_prot_broad_list=common.normalizeActivityNames(act_prot_broad_list,package_name)
+	act_priv_list=common.normalizeActivityNames(act_priv_list,common.package_name)
+	act_exp_list=common.normalizeActivityNames(act_exp_list,common.package_name)
+	act_exp_perm_list=common.normalizeActivityNames(act_exp_perm_list,common.package_name)
+	act_prot_broad_list=common.normalizeActivityNames(act_prot_broad_list,common.package_name)
 
 	report_badger("appcomponents", results)
 	common.print_terminal(report_data)
@@ -660,20 +322,6 @@ clear_lines(14)
 height = common.term.height
 
 try:
-	writer1 = common.Writer((0, height-8))
-	pbar1 = ProgressBar(widgets=['X.509 Validation ', Percentage(), Bar()], maxval=100, fd=writer1).start()
-	writer2 = common.Writer((0, height-6))
-	pbar2 = ProgressBar(widgets=['Pending Intents ', Percentage(), Bar()], maxval=100, fd=writer2).start()
-	writer3 = common.Writer((0, height-4))
-	pbar3 = ProgressBar(widgets=['File Permissions (check 1) ', Percentage(), Bar()], maxval=100, fd=writer3).start()
-	writer4 = common.Writer((0, height-2))
-	pbar4 = ProgressBar(widgets=['File Permissions (check 2) ', Percentage(), Bar()], maxval=100, fd=writer4).start()
-	writer5 = common.Writer((0, height-10))
-	pbar5 = ProgressBar(widgets=['Webview checks ', Percentage(), Bar()], maxval=100, fd=writer5).start()
-	writer6 = common.Writer((0, height-12))
-	pbar6 = ProgressBar(widgets=['Broadcast issues ', Percentage(), Bar()], maxval=100, fd=writer6).start()
-	writer7 = common.Writer((0, height-14))
-	pbar7 = ProgressBar(widgets=['Crypto issues ', Percentage(), Bar()], maxval=100, fd=writer7).start()
 
 	pub.subscribe(progress_bar_update, 'progress')
 
@@ -836,17 +484,7 @@ try:
 
 except Exception as e:
 	common.logger.error("Unexpected error: " + str(e))
-########################
-#Look for exported Preference activities
-'''
-if common.minSdkVersion<19:
-	try:
-		if (len(act_exp_list)>0) or (len(actalias_exp_list>0)):
-			exportedPreferenceActivity.main()
-	except Exception as e:
-		common.logger.error("Unable to check for exported Preference Activities: " + str(e))
-'''
-#########################
+
 #Look for TapJacking vulnerabilities
 #Native protection was added in API v. 9, so previous likely vulnerable
 if common.minSdkVersion >8:
@@ -901,7 +539,7 @@ common.print_terminal_header("ADB EXPLOIT COMMANDS")
 
 for a in common.xmldoc.getElementsByTagName('manifest'):
 	if 'package' in a.attributes.keys():
-		package_name=a.attributes['package'].value
+		common.package_name=a.attributes['package'].value
 
 
 try:
@@ -933,7 +571,7 @@ while True:
 	try:
 		if common.interactive_mode:
 			print common.term.cyan + common.term.bold + str(common.config.get('qarkhelper','EXPLOIT_CHOICE')).decode('string-escape').format(t=common.term)
-			exploit_choice=int(raw_input(common.config.get('qarkhelper','ENTER_YOUR_CHOICE')))
+			exploit_choice =int(raw_input(common.config.get('qarkhelper','ENTER_YOUR_CHOICE')))
 			if exploit_choice in (1,2):
 				break
 			else:
@@ -951,7 +589,7 @@ while True:
 				exit()
 			common.logger.error(common.config.get('qarkhelper','NOT_A_VALID_OPTION_INTERACTIVE'))
 
-if exploit_choice==1:
+if exploit_choice ==1:
 	# Exploit all vulnerabilities
 	print "Generating exploit payloads for all vulnerabilities"
 	type_list=['String','StringArray','StringArrayList','Boolean','BooleanArray','Int','Float','Long','LongArray','[]','','IntArray','IntegerArrayList','FloatArray','Double','Char','CharArray','CharSequence','CharSequenceArray','CharSequenceArrayList','Byte','ByteArray', 'Bundle','Short','ShortArray','Serializable','Parcelable','ParcelableArrayList','ParcelableArray','unknownType']
@@ -975,7 +613,7 @@ if exploit_choice==1:
 							extras_list+=tmp_extra
 				common.dedup(extras_list)
 				if re.match(r'^\..*',str(i)):
-					i=str(package_name)+str(i)
+					i=str(common.package_name)+str(i)
 				exploit.setExportedActivity(str(i))
 				for j in range(0,len(extras_list)):
 					extras_list[j] = str(extras_list[j]).replace('\"','')
@@ -1057,7 +695,7 @@ if exploit_choice==1:
 				common.logger.error("Problems installing exploit APK: " + str(e))
 		else:
 			common.logger.info("The apk can be found in the "+common.getConfig("rootDir")+"/build/qark directory")
-elif exploit_choice==2:
+elif exploit_choice ==2:
 	if common.reportInitSuccess:
 		print "An html report of the findings is located in : " + common.getConfig("rootDir") + "/report/report.html"
 	else:

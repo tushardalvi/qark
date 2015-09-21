@@ -13,11 +13,13 @@ import ast
 import string
 import ConfigParser
 from xml.dom import minidom
-from lib.BeautifulSoup import BeautifulSoup
+from axmlparserpy import axmlprinter as axmlprinter
+import bs4
 from distutils.version import StrictVersion
+from modules.common import exit
 from modules.unpackAPK import unpack, find_manifest_in_unpacked_apk
 import plistlib
-from modules import common
+from modules import common, report
 from urllib2 import HTTPError
 from httplib import HTTPException
 import logging
@@ -100,7 +102,7 @@ def determine_min_sdk():
 				play_url+=package_name
 				print play_url
 				page=urllib2.urlopen(play_url)
-				html=BeautifulSoup(page.read())
+				html=bs4(page.read())
 				play_version=html.find(itemprop="operatingSystems")
 				plat_version=re.findall('\d+.\d+', play_version.contents[0])
 				if plat_version:
@@ -182,3 +184,67 @@ def determine_min_sdk():
 				maxSdkVersion = common.sdk[0].attributes['android:maxSdkVersion'].value
 	return
 
+
+def process_manifest(manifest):
+
+	try:
+		common.manifest = os.path.abspath(str(manifest).strip())
+		common.manifest = re.sub("\\\\\s",' ',common.manifest)
+		common.xmldoc = minidom.parse(common.manifest)
+		common.logger.info(common.xmldoc.toprettyxml())
+		report.write_manifest(common.xmldoc)
+	except Exception as e:
+		try:
+			# not human readable yet?
+			ap = axmlprinter.AXMLPrinter(open(common.manifest, 'rb').read())
+			common.xmldoc = minidom.parseString(ap.getBuff())
+			common.logger.info(common.xmldoc.toxml())
+			report.write_manifest(common.xmldoc.toprettyxml())
+		except Exception as e:
+			if not common.interactive_mode:
+				common.logger.error(str(e) + "\r\nThat didnt work. Try providing an absolute path to the file")
+				exit()
+			common.logger.error(str(e) + "\r\nThat didnt work. Try providing an absolute path to the file\n")
+
+
+def find_manifest_in_source():
+	common.logger.info('Finding AndroidManifest.xml')
+	listOfFiles = []
+	manifestPath=''
+	try:
+		for (dirpath, dirnames, filenames) in os.walk(common.sourceDirectory):
+			for filename in filenames:
+				if filename == 'AndroidManifest.xml':
+					listOfFiles.append(os.path.join(dirpath,filename))
+		if len(listOfFiles)==0:
+			while True:
+				print common.term.cyan + common.term.bold + str(common.config.get('qarkhelper','CANT_FIND_MANIFEST')).decode('string-escape').format(t=common.term)
+				common.sourceDirectory=os.path.abspath(raw_input("Enter path: ")).rstrip()
+				common.sourceDirectory = re.sub("\\\\\s",' ',common.sourceDirectory)
+				if os.path.isdir(common.sourceDirectory):
+					if not common.sourceDirectory.endswith('/'):
+						common.sourceDirectory+='/'
+					manifestPath=find_manifest_in_source()
+					common.manifest=manifestPath
+					break
+				else:
+					common.logger.error("Not a directory. Please try again")
+
+		elif len(listOfFiles)>1:
+			print "Please enter the number corresponding to the correct file:"
+			for f in enumerate(listOfFiles,1):
+				print str(f)
+			while True:
+				selection=int(raw_input())
+				r=range(1,len(listOfFiles)+1)
+				if int(selection) in r:
+					manifestPath=listOfFiles[selection-1]
+					break
+				else:
+					print "Invalid selection, please enter a number between 1 and " + str(len(listOfFiles))
+		else:
+			manifestPath=listOfFiles[0]
+	except Exception as e:
+		common.logger.error(str(e))
+		exit()
+	return manifestPath

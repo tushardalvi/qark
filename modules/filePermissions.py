@@ -10,8 +10,8 @@ from modules.IssueType import IssueType, IssueSeverity
 from report import ReportIssue
 from modules.common import Severity, ReportIssue
 from createExploit import ExploitType
-from lib.progressbar import *
-from lib.pubsub import pub
+from progressbar import *
+from pubsub import pub
 from common import terminalPrint
 import logging
 

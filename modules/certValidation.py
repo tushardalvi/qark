@@ -10,12 +10,12 @@ import lib.plyj.parser as plyj
 import lib.plyj.model as m
 import re,sys
 import logging
-from lib.progressbar import *
+from progressbar import *
 from multiprocessing import Process
 from report import ReportIssue
 from modules.common import Severity, ReportIssue
 from createExploit import ExploitType
-from lib.pubsub import pub
+from pubsub import pub
 from common import terminalPrint
 
 parser = plyj.Parser()

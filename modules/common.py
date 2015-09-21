@@ -4,6 +4,7 @@
 Unless required by applicable law or agreed to in writing, software 
 distributed under the License is distributed on an "AS IS" BASIS, 
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.'''
+from threading import Thread
 from modules.createExploit import ExploitType
 
 """
@@ -20,10 +21,10 @@ import logging
 
 from IssueType import IssueType, IssueSeverity
 from collections import defaultdict
-from lib import colorama
+import colorama
 import glob
 import subprocess
-from lib.blessed import *
+from blessed import *
 
 
 VULNERABILITY_LEVEL = 60
@@ -78,6 +79,7 @@ file_not_found=[]
 #TODO - This pages lists system-only Intents: http://developer.android.com/reference/android/content/Intent.html, which all seem to be included in the list below, but when we're not lazy, we shoudl verify this and break them out
 #TODO - Need to double check that we're checking for protected Intents in all the right places below
 protected_broadcasts=['android.intent.action.SCREEN_OFF','android.intent.action.SCREEN_ON','android.intent.action.USER_PRESENT','android.intent.action.TIME_TICK','android.intent.action.TIMEZONE_CHANGED','android.intent.action.BOOT_COMPLETED','android.intent.action.PACKAGE_INSTALL','android.intent.action.PACKAGE_ADDED','android.intent.action.PACKAGE_REPLACED','android.intent.action.MY_PACKAGE_REPLACED','android.intent.action.PACKAGE_REMOVED','android.intent.action.PACKAGE_FULLY_REMOVED','android.intent.action.PACKAGE_CHANGED','android.intent.action.PACKAGE_RESTARTED','android.intent.action.PACKAGE_DATA_CLEARED','android.intent.action.PACKAGE_FIRST_LAUNCH','android.intent.action.PACKAGE_NEEDS_VERIFICATION','android.intent.action.PACKAGE_VERIFIED','android.intent.action.UID_REMOVED','android.intent.action.QUERY_PACKAGE_RESTART','android.intent.action.CONFIGURATION_CHANGED','android.intent.action.LOCALE_CHANGED','android.intent.action.BATTERY_CHANGED','android.intent.action.BATTERY_LOW','android.intent.action.BATTERY_OKAY','android.intent.action.ACTION_POWER_CONNECTED','android.intent.action.ACTION_POWER_DISCONNECTED','android.intent.action.ACTION_SHUTDOWN','android.intent.action.DEVICE_STORAGE_LOW','android.intent.action.DEVICE_STORAGE_OK','android.intent.action.DEVICE_STORAGE_FULL','android.intent.action.DEVICE_STORAGE_NOT_FULL','android.intent.action.NEW_OUTGOING_CALL','android.intent.action.REBOOT','android.intent.action.DOCK_EVENT','android.intent.action.MASTER_CLEAR_NOTIFICATION','android.intent.action.USER_ADDED','android.intent.action.USER_REMOVED','android.intent.action.USER_STOPPED','android.intent.action.USER_BACKGROUND','android.intent.action.USER_FOREGROUND','android.intent.action.USER_SWITCHED','android.app.action.ENTER_CAR_MODE','android.app.action.EXIT_CAR_MODE','android.app.action.ENTER_DESK_MODE','android.app.action.EXIT_DESK_MODE','android.appwidget.action.APPWIDGET_UPDATE_OPTIONS','android.appwidget.action.APPWIDGET_DELETED','android.appwidget.action.APPWIDGET_DISABLED','android.appwidget.action.APPWIDGET_ENABLED','android.backup.intent.RUN','android.backup.intent.CLEAR','android.backup.intent.INIT','android.bluetooth.adapter.action.STATE_CHANGED','android.bluetooth.adapter.action.SCAN_MODE_CHANGED','android.bluetooth.adapter.action.DISCOVERY_STARTED','android.bluetooth.adapter.action.DISCOVERY_FINISHED','android.bluetooth.adapter.action.LOCAL_NAME_CHANGED','android.bluetooth.adapter.action.CONNECTION_STATE_CHANGED','android.bluetooth.device.action.FOUND','android.bluetooth.device.action.DISAPPEARED','android.bluetooth.device.action.CLASS_CHANGED','android.bluetooth.device.action.ACL_CONNECTED','android.bluetooth.device.action.ACL_DISCONNECT_REQUESTED','android.bluetooth.device.action.ACL_DISCONNECTED','android.bluetooth.device.action.NAME_CHANGED','android.bluetooth.device.action.BOND_STATE_CHANGED','android.bluetooth.device.action.NAME_FAILED','android.bluetooth.device.action.PAIRING_REQUEST','android.bluetooth.device.action.PAIRING_CANCEL','android.bluetooth.device.action.CONNECTION_ACCESS_REPLY','android.bluetooth.headset.profile.action.CONNECTION_STATE_CHANGED','android.bluetooth.headset.profile.action.AUDIO_STATE_CHANGED','android.bluetooth.headset.action.VENDOR_SPECIFIC_HEADSET_EVENT','android.bluetooth.a2dp.profile.action.CONNECTION_STATE_CHANGED','android.bluetooth.a2dp.profile.action.PLAYING_STATE_CHANGED','android.bluetooth.input.profile.action.CONNECTION_STATE_CHANGED','android.bluetooth.pan.profile.action.CONNECTION_STATE_CHANGED','android.hardware.display.action.WIFI_DISPLAY_STATUS_CHANGED','android.hardware.usb.action.USB_STATE','android.hardware.usb.action.USB_ACCESSORY_ATTACHED','android.hardware.usb.action.USB_ACCESSORY_ATTACHED','android.hardware.usb.action.USB_DEVICE_ATTACHED','android.hardware.usb.action.USB_DEVICE_DETACHED','android.intent.action.HEADSET_PLUG','android.intent.action.ANALOG_AUDIO_DOCK_PLUG','android.intent.action.DIGITAL_AUDIO_DOCK_PLUG','android.intent.action.HDMI_AUDIO_PLUG','android.intent.action.USB_AUDIO_ACCESSORY_PLUG','android.intent.action.USB_AUDIO_DEVICE_PLUG','android.net.conn.CONNECTIVITY_CHANGE','android.net.conn.CONNECTIVITY_CHANGE_IMMEDIATE','android.net.conn.DATA_ACTIVITY_CHANGE','android.net.conn.BACKGROUND_DATA_SETTING_CHANGED','android.net.conn.CAPTIVE_PORTAL_TEST_COMPLETED','android.nfc.action.LLCP_LINK_STATE_CHANGED','com.android.nfc_extras.action.RF_FIELD_ON_DETECTED','com.android.nfc_extras.action.RF_FIELD_OFF_DETECTED','com.android.nfc_extras.action.AID_SELECTED','android.nfc.action.TRANSACTION_DETECTED','android.intent.action.CLEAR_DNS_CACHE','android.intent.action.PROXY_CHANGE','android.os.UpdateLock.UPDATE_LOCK_CHANGED','android.intent.action.DREAMING_STARTED','android.intent.action.DREAMING_STOPPED','android.intent.action.ANY_DATA_STATE','com.android.server.WifiManager.action.START_SCAN','com.android.server.WifiManager.action.DELAYED_DRIVER_STOP','android.net.wifi.WIFI_STATE_CHANGED','android.net.wifi.WIFI_AP_STATE_CHANGED','android.net.wifi.WIFI_SCAN_AVAILABLE','android.net.wifi.SCAN_RESULTS','android.net.wifi.RSSI_CHANGED','android.net.wifi.STATE_CHANGE','android.net.wifi.LINK_CONFIGURATION_CHANGED','android.net.wifi.CONFIGURED_NETWORKS_CHANGE','android.net.wifi.supplicant.CONNECTION_CHANGE','android.net.wifi.supplicant.STATE_CHANGE','android.net.wifi.p2p.STATE_CHANGED','android.net.wifi.p2p.DISCOVERY_STATE_CHANGE','android.net.wifi.p2p.THIS_DEVICE_CHANGED','android.net.wifi.p2p.PEERS_CHANGED','android.net.wifi.p2p.CONNECTION_STATE_CHANGE','android.net.wifi.p2p.PERSISTENT_GROUPS_CHANGED','android.net.conn.TETHER_STATE_CHANGED','android.net.conn.INET_CONDITION_ACTION','android.intent.action.EXTERNAL_APPLICATIONS_AVAILABLE','android.intent.action.EXTERNAL_APPLICATIONS_UNAVAILABLE','android.intent.action.AIRPLANE_MODE','android.intent.action.ADVANCED_SETTINGS','android.intent.action.BUGREPORT_FINISHED','android.intent.action.ACTION_IDLE_MAINTENANCE_START','android.intent.action.ACTION_IDLE_MAINTENANCE_END','android.intent.action.SERVICE_STATE','android.intent.action.RADIO_TECHNOLOGY','android.intent.action.EMERGENCY_CALLBACK_MODE_CHANGED','android.intent.action.SIG_STR','android.intent.action.ANY_DATA_STATE','android.intent.action.DATA_CONNECTION_FAILED','android.intent.action.SIM_STATE_CHANGED','android.intent.action.NETWORK_SET_TIME','android.intent.action.NETWORK_SET_TIMEZONE','android.intent.action.ACTION_SHOW_NOTICE_ECM_BLOCK_OTHERS','android.intent.action.ACTION_MDN_STATE_CHANGED','android.provider.Telephony.SPN_STRINGS_UPDATED','android.provider.Telephony.SIM_FULL','com.android.internal.telephony.data-restart-trysetup','com.android.internal.telephony.data-stall']
+package_name=''
 
 '''
 This is here specifically because we saw an issue with the import of html5lib in python on some machines
@@ -953,3 +955,32 @@ class ReportIssue():
 
 	def setExtras(self, key, value):
 		self.extra[key] = value
+
+
+def exit():
+	"""
+	Wrapper for exiting the program gracefully. Internally calls sys.exit()
+	"""
+	sys.exit()
+
+
+def clear_lines(n):
+	"""
+   Clear the space before using it
+	"""
+	thread0 = Thread(name='Clear Lines', target=clear, args=(n,))
+	thread0.start()
+	thread0.join()
+
+
+def clear(n):
+	"""
+	clears n lines on the terminal
+	"""
+	with term.location():
+		print("\n"*n)
+
+
+def version():
+	print "Version 0.8"
+	sys.exit()

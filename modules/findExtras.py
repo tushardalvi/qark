@@ -6,15 +6,22 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.'''
 
 import zipfile
-import os
+import os, sys
 from genericpath import isdir
 from modules import common
 import subprocess
 import logging
 import shlex
 import re
-import lib.plyj.parser as plyj
-import lib.plyj.model as m
+try:
+	print sys.path
+	print "Trying............"
+	import plyj.parser as plyj
+	import plyj.model as m
+except:
+	print "Failed....trying again..........."
+	import lib.plyj.parser as plyj
+	import lib.plyj.model as m
 from modules import constantResolver
 from xml.dom import minidom
 
